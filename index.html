@@ -1,0 +1,332 @@
+﻿<!DOCTYPE html>
+<html>
+
+<head>
+	<meta charset="utf-8" />
+	<title></title>
+	<style>
+		table {
+			border: 0
+		}
+
+		.commslog-data {
+			font-family: Consolas, Courier New, Courier, monospace;
+		}
+
+		.commslog-server {
+			background-color: red;
+			color: white
+		}
+
+		.commslog-client {
+			background-color: green;
+			color: white
+		}
+
+	</style>
+</head>
+
+<body>
+	<!--   HEADER ====================================================================== -->
+	<h1>Simple notifications</h1>
+	<p id="stateLabel">Ready to connect...</p>
+	<!--   CONNECTION INPUTS AND BUTTONS ========================================================== -->
+	<div>
+
+		<div>
+			<label for="userId">User Id:</label>
+			<input id="userId" type="text" disabled size="100" />
+		</div>
+		<div>
+			<label for="userSecret">User Secret:</label>
+			<input id="userSecret" disabled size="100" />
+		</div>
+		<div>
+			<label for="jwt">Jwt:</label>
+			<textarea id="jwt" cols="150" rows="2" disabled></textarea>
+		</div>
+
+		<br /><br />
+		<div>
+			<label for="userIdSelect">Owner of merchants:</label>
+			<select id="userIdSelect">
+			<option value="1">Valid owner 1</option>
+		  	<option value="2">Valid owner 2</option>
+		  	<option value="3">Valid owner 3</option>
+		  	<option value="4">Non Existing owner</option>
+		  	<option value="5">Valid owner 1 with damaged secret</option>
+			</select>
+		</div>
+		<br />
+		<div>
+			<label for="expireSeconds">Seconds for token expiration:</label>
+			<input id="expireSeconds" value="15" sixe/>
+			<button id="generageJwt">Update JWT expiration</button>
+		</div>
+		<br />
+		<div>
+			<label for="wsPrefix">WebSocket Prefix:</label>
+			<input id="wsPrefix" value="ws://" disabled size="8" />
+			<br />
+			<label for="webSocketUrl">WebSocket Url:</label>
+			<input id="wsUrl" value="localhost:60694" size="20" />
+			<br />
+			<input id="wsQuery" size="250" disabled/>
+		</div>
+
+		<br />
+		<div>
+			<button id="connectBtn">Connect</button>
+			<button id="disconnectBtn" disabled>Disconnect</button>
+		</div>
+		<br />
+
+		<div>
+			<label for="messageText">Message to server:</label>
+			<input id="messageText" type="text" size="100" disabled/>
+			<button id="sendMessageBtn" disabled>Send</button>
+
+		</div>
+
+		<p></p>
+	</div>
+	<!--   L O G ============================================================================== -->
+	<div>
+		<h2>Communication Log</h2>
+		<table style="width: 800px">
+			<thead>
+				<tr>
+					<td style="width: 100px">From</td>
+					<td style="width: 100px">To</td>
+					<td>Data</td>
+				</tr>
+			</thead>
+			<tbody id="commsLog"></tbody>
+		</table>
+	</div>
+	<!--   SCRIPT  ============================================================================== -->
+	<script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha256-k2WSCIexGzOj3Euiig+TlR8gA0EmPjuc79OEeY5L45g=" crossorigin="anonymous"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/rollups/hmac-sha256.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/components/enc-base64-min.js"></script>
+
+	<script>
+		var commsLog = document.getElementById("commsLog");
+
+		var users = [{
+				id: "a6241f60-bf59-4cfe-8dcb-a17c81d7abb5",
+				key: "superJwtSecretSecretSecret_key1"
+			},
+			{
+				id: "9bf6771c-f88c-4b1d-9023-1620eba39c6d",
+				key: "superJwtSecretSecretSecret_key2"
+			},
+			{
+				id: "a31a2a69-eb6e-4257-b8f8-73b5addecc15",
+				key: "superJwtSecretSecretSecret_key3"
+			},
+			{ // Non existing user, random secret 
+				id: "a6b795a4-fa5f-44be-8ea7-875e2f9cef55",
+				key: "superJwtSecretSecretSecret_key5"
+			},
+			{ // valid user 1, invalid secret 
+				id: "a6241f60-bf59-4cfe-8dcb-a17c81d7abb5",
+				key: "invalid_secret_invalid_secret"
+			}
+		]
+		var stateLabel = $("#stateLabel");
+		var userSelect = $("#userIdSelect");
+		var userId = $("#userId");
+		var userSecret = $("#userSecret");
+		var generageJwt = $("#generageJwt");
+		var expireSeconds = $("#expireSeconds");
+		var jwt = $("#jwt");
+		var stateLabel = $("#stateLabel");
+		var wsPrefix = $("#wsPrefix");
+		var wsUrl = $("#wsUrl");
+		var wsQuery = $("#wsQuery");
+		var connectBtn = $("#connectBtn");
+		var disconnectBtn = $("#disconnectBtn");
+		var messageText = $("#messageText");
+		var sendMessageBtn = $("#sendMessageBtn");
+
+		var socket;
+
+		userSelect.change(ChangeUser);
+
+		generageJwt.click(GenerateJWT);
+		disconnectBtn.click(Disconnect);
+		connectBtn.click(Connect);
+		sendMessageBtn.click(SendMessage);
+
+		function ChangeUser() {
+			var val = userSelect.val();
+			if (val < 1 || val > 5)
+				return;
+			userId.val(users[val - 1].id);
+			userSecret.val(users[val - 1].key);
+			GenerateJWT();
+			document.cookie = "userName=asdf";
+		};
+
+		function Connect() {
+			stateLabel.html("Connecting");
+			socket = new WebSocket(wsPrefix.val() + wsUrl.val() + wsQuery.val());
+			socket.onopen = function(event) {
+				updateState();
+				commsLog.innerHTML += '<tr>' +
+					'<td colspan="3" class="commslog-data">Connection opened</td>' +
+					'</tr>';
+			};
+
+			socket.onclose = function(event) {
+				updateState();
+				commsLog.innerHTML += '<tr>' +
+					'<td colspan="3" class="commslog-data">Connection closed. Code: ' + event.code + '. Reason: ' + event.reason + '</td>' +
+					'</tr>';
+			};
+
+			socket.onerror = updateState;
+			socket.onmessage = function(event) {
+				commsLog.innerHTML += '<tr>' +
+					'<td class="commslog-server">Server</td>' +
+					'<td class="commslog-client">Client</td>' +
+					'<td class="commslog-data">' + event.data + '</td>'
+				'</tr>';
+			};
+		};
+
+		function Disconnect() {
+			if (!socket || socket.readyState != WebSocket.OPEN) {
+				alert("socket not connected");
+			}
+			socket.close(1000, "Closing from client");
+		};
+
+		function GenerateJWT() {
+			var milliseconds = (Math.floor((new Date).getTime() / 1000));
+			milliseconds += +expireSeconds.val();
+
+			// Defining our token parts
+			var header = {
+				"alg": "HS256",
+				"typ": "JWT"
+			};
+
+			var data = {
+				"id": userId.val(),
+				"exp": milliseconds
+			};
+
+			var secret = userSecret.val();
+
+			function base64url(source) {
+				// Encode in classical base64
+				encodedSource = CryptoJS.enc.Base64.stringify(source);
+
+				// Remove padding equal characters
+				encodedSource = encodedSource.replace(/=+$/, '');
+
+				// Replace characters according to base64url specifications
+				encodedSource = encodedSource.replace(/\+/g, '-');
+				encodedSource = encodedSource.replace(/\//g, '_');
+
+				return encodedSource;
+			}
+
+			var stringifiedHeader = CryptoJS.enc.Utf8.parse(JSON.stringify(header));
+			var encodedHeader = base64url(stringifiedHeader);
+
+
+			var stringifiedData = CryptoJS.enc.Utf8.parse(JSON.stringify(data));
+			var encodedData = base64url(stringifiedData);
+
+
+			var signature = encodedHeader + "." + encodedData;
+			signature = CryptoJS.HmacSHA256(signature, secret);
+			signature = base64url(signature);
+
+
+			var token = encodedHeader + "." + encodedData + "." + signature;
+			jwt.html(token);
+
+			UpdateQuery();
+		};
+
+		function SendMessage() {
+			if (!socket || socket.readyState != WebSocket.OPEN) {
+				alert("socket not connected");
+			}
+
+			var data = {
+				Text: messageText.val()
+			};
+			var jsonMsg = JSON.stringify(data);
+			socket.send(jsonMsg);
+			commsLog.innerHTML += '<tr>' +
+				'<td class="commslog-client">Client</td>' +
+				'<td class="commslog-server">Server</td>' +
+				'<td class="commslog-data">' + jsonMsg + '</td>'
+			'</tr>';
+			messageText.val("");
+		};
+
+		function UpdateQuery() {
+			wsQuery.val("?user=" + userId.val() + "&token=" + jwt.val())
+		};
+
+		function updateState() {
+			function disable() {
+				disconnectBtn.prop('disabled', true);
+				messageText.prop('disabled', true);
+				sendMessageBtn.prop('disabled', true);
+			}
+
+			function enable() {
+				disconnectBtn.prop('disabled', false);
+				messageText.prop('disabled', false);
+				sendMessageBtn.prop('disabled', false);
+			}
+
+			wsUrl.prop('disabled', true);
+			connectBtn.prop('disabled', true);
+			userSelect.prop('disabled', true);
+
+			if (!socket) {
+				disable();
+			} else {
+				switch (socket.readyState) {
+					case WebSocket.CLOSED:
+						stateLabel.html("Closed");
+						disable();
+						wsUrl.prop('disabled', false);
+						connectBtn.prop('disabled', false);
+						userSelect.prop('disabled', false);
+						break;
+					case WebSocket.CLOSING:
+						stateLabel.html("Closing...");
+						disable();
+						break;
+					case WebSocket.CONNECTING:
+						stateLabel.html("Connecting...");
+						disable();
+						break;
+					case WebSocket.OPEN:
+						stateLabel.html("Open");
+						enable();
+						break;
+					default:
+						stateLabel.html("Unknown WebSocket State: " + socket.readyState);
+						disable();
+						break;
+				}
+			}
+		};
+
+		$(document).ready(function() {
+			ChangeUser();
+		});
+
+	</script>
+</body>
+
+</html>
